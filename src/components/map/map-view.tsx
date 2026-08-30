@@ -144,7 +144,11 @@ function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: 
     layout: { visibility: layers.clusters ? "visible" : "none" },
     paint: {
       "circle-color": ["step", ["get", "point_count"], "#2563eb", 10, "#1d4ed8", 25, "#1e40af"],
-      "circle-radius": ["step", ["get", "point_count"], 17, 10, 22, 25, 27],
+      "circle-radius": [
+        "+",
+        ["step", ["get", "point_count"], 17, 10, 22, 25, 27],
+        ["case", ["boolean", ["feature-state", "hover"], false], 4, 0],
+      ],
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 3,
       "circle-opacity": 0.92,
@@ -304,7 +308,6 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
     map.addControl(new mapboxgl.AttributionControl({ compact: true }), "bottom-right");
     map.addControl(new mapboxgl.ScaleControl({ maxWidth: 80, unit: "imperial" }), "bottom-left");
 
-    let hoveredSiteId: string | number | null = null;
     const tooltip = new mapboxgl.Popup({
       closeButton: false,
       closeOnClick: false,
@@ -312,57 +315,91 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
       className: "sitepulse-map-tooltip",
     });
     const handleStyleLoad = () => {
-      hoveredSiteId = null;
       tooltip.remove();
       addOperationalLayers(map, sitesRef.current, selectedSiteIdRef.current, layersRef.current);
     };
     const showPointer = () => { map.getCanvas().style.cursor = "pointer"; };
     const resetPointer = () => { map.getCanvas().style.cursor = ""; };
-    const clearSiteHover = () => {
-      if (hoveredSiteId !== null && map.getSource(SITE_SOURCE_ID)) {
-        map.setFeatureState({ source: SITE_SOURCE_ID, id: hoveredSiteId }, { hover: false });
-      }
-      hoveredSiteId = null;
-      tooltip.remove();
-      resetPointer();
+    const registerInteractions = () => {
+      map.addInteraction("site-click", {
+        type: "click",
+        target: { layerId: SITE_LAYER_ID },
+        handler: (event) => {
+          const siteId = event.feature?.properties?.id;
+          if (typeof siteId === "string") onSelectSiteRef.current(siteId);
+        },
+      });
+      map.addInteraction("cluster-click", {
+        type: "click",
+        target: { layerId: CLUSTER_LAYER_ID },
+        handler: (event) => {
+          const feature = event.feature as unknown as InteractiveMapFeature | undefined;
+          const clusterId = Number(feature?.properties?.cluster_id);
+          const coordinates = feature?.geometry.type === "Point" ? feature.geometry.coordinates : null;
+          const source = map.getSource(SITE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+          if (!source || !isPointCoordinates(coordinates) || !Number.isFinite(clusterId)) return;
+          source.getClusterExpansionZoom(clusterId, (error, zoom) => {
+            if (!error && zoom != null) map.easeTo({ center: coordinates, zoom });
+          });
+        },
+      });
+      map.addInteraction("site-hover-enter", {
+        type: "mouseenter",
+        target: { layerId: SITE_LAYER_ID },
+        handler: (event) => {
+          if (!event.feature) return;
+          const feature = event.feature as unknown as InteractiveMapFeature;
+          const coordinates = feature.geometry.type === "Point" ? feature.geometry.coordinates : null;
+          map.setFeatureState(event.feature, { hover: true });
+          showPointer();
+          if (isPointCoordinates(coordinates)) {
+            tooltip
+              .setLngLat(coordinates)
+              .setDOMContent(createSiteTooltip(feature.properties?.name, feature.properties?.status))
+              .addTo(map);
+          }
+        },
+      });
+      map.addInteraction("site-hover-leave", {
+        type: "mouseleave",
+        target: { layerId: SITE_LAYER_ID },
+        handler: (event) => {
+          if (event.feature) map.setFeatureState(event.feature, { hover: false });
+          tooltip.remove();
+          resetPointer();
+        },
+      });
+      map.addInteraction("cluster-hover-enter", {
+        type: "mouseenter",
+        target: { layerId: CLUSTER_LAYER_ID },
+        handler: (event) => {
+          if (!event.feature) return;
+          const feature = event.feature as unknown as InteractiveMapFeature;
+          const coordinates = feature.geometry.type === "Point" ? feature.geometry.coordinates : null;
+          map.setFeatureState(event.feature, { hover: true });
+          showPointer();
+          if (isPointCoordinates(coordinates)) {
+            const pointCount = feature.properties?.point_count;
+            tooltip
+              .setLngLat(coordinates)
+              .setDOMContent(createSiteTooltip("Site cluster", typeof pointCount === "number" ? `${pointCount} sites` : "Multiple sites"))
+              .addTo(map);
+          }
+        },
+      });
+      map.addInteraction("cluster-hover-leave", {
+        type: "mouseleave",
+        target: { layerId: CLUSTER_LAYER_ID },
+        handler: (event) => {
+          if (event.feature) map.setFeatureState(event.feature, { hover: false });
+          tooltip.remove();
+          resetPointer();
+        },
+      });
     };
 
     map.on("style.load", handleStyleLoad);
-    map.on("click", SITE_LAYER_ID, (event) => {
-      const feature = event.features?.[0] as unknown as InteractiveMapFeature | undefined;
-      const siteId = feature?.properties?.id;
-      if (typeof siteId === "string") onSelectSiteRef.current(siteId);
-    });
-    map.on("click", CLUSTER_LAYER_ID, (event) => {
-      const feature = event.features?.[0] as unknown as InteractiveMapFeature | undefined;
-      const clusterId = Number(feature?.properties?.cluster_id);
-      const coordinates = feature?.geometry.type === "Point" ? feature.geometry.coordinates : null;
-      const source = map.getSource(SITE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
-      if (!source || !coordinates || !Number.isFinite(clusterId)) return;
-      source.getClusterExpansionZoom(clusterId, (error, zoom) => {
-        if (!error && zoom != null) map.easeTo({ center: coordinates as [number, number], zoom });
-      });
-    });
-    map.on("mousemove", SITE_LAYER_ID, (event) => {
-      const feature = event.features?.[0] as unknown as InteractiveMapFeature | undefined;
-      const featureId = feature?.id;
-      const coordinates = feature?.geometry.type === "Point" ? feature.geometry.coordinates : null;
-      if (featureId === undefined || !isPointCoordinates(coordinates)) return;
-
-      if (hoveredSiteId !== null && hoveredSiteId !== featureId) {
-        map.setFeatureState({ source: SITE_SOURCE_ID, id: hoveredSiteId }, { hover: false });
-      }
-      hoveredSiteId = featureId;
-      map.setFeatureState({ source: SITE_SOURCE_ID, id: featureId }, { hover: true });
-      tooltip
-        .setLngLat(coordinates)
-        .setDOMContent(createSiteTooltip(feature?.properties?.name, feature?.properties?.status))
-        .addTo(map);
-    });
-    map.on("mouseenter", SITE_LAYER_ID, showPointer);
-    map.on("mouseleave", SITE_LAYER_ID, clearSiteHover);
-    map.on("mouseenter", CLUSTER_LAYER_ID, showPointer);
-    map.on("mouseleave", CLUSTER_LAYER_ID, resetPointer);
+    map.once("load", registerInteractions);
 
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(container);
