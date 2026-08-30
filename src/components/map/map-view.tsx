@@ -20,6 +20,7 @@ const REGION_FILL_LAYER_ID = "operational-region-fill";
 const REGION_OUTLINE_LAYER_ID = "operational-region-outline";
 const ROUTE_LAYER_ID = "operations-network";
 const CLUSTER_LAYER_ID = "site-clusters";
+const CLUSTER_HOVER_LAYER_ID = "site-cluster-hover";
 const CLUSTER_COUNT_LAYER_ID = "site-cluster-count";
 const SITE_LAYER_ID = "site-points";
 const SELECTED_SITE_LAYER_ID = "selected-site-halo";
@@ -134,6 +135,7 @@ function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: 
     cluster: true,
     clusterRadius: 50,
     clusterMaxZoom: 10,
+    promoteId: "id",
   });
 
   map.addLayer({
@@ -144,14 +146,24 @@ function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: 
     layout: { visibility: layers.clusters ? "visible" : "none" },
     paint: {
       "circle-color": ["step", ["get", "point_count"], "#2563eb", 10, "#1d4ed8", 25, "#1e40af"],
-      "circle-radius": [
-        "+",
-        ["step", ["get", "point_count"], 17, 10, 22, 25, 27],
-        ["case", ["boolean", ["feature-state", "hover"], false], 4, 0],
-      ],
+      "circle-radius": ["step", ["get", "point_count"], 17, 10, 22, 25, 27],
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 3,
       "circle-opacity": 0.92,
+    },
+  });
+
+  map.addLayer({
+    id: CLUSTER_HOVER_LAYER_ID,
+    type: "circle",
+    source: SITE_SOURCE_ID,
+    filter: ["==", ["get", "cluster_id"], -1],
+    layout: { visibility: layers.clusters ? "visible" : "none" },
+    paint: {
+      "circle-color": "rgba(37, 99, 235, 0.12)",
+      "circle-radius": ["+", ["step", ["get", "point_count"], 17, 10, 22, 25, 27], 5],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 3,
     },
   });
 
@@ -232,7 +244,7 @@ function setLayerVisibility(map: mapboxgl.Map, layers: MapLayerVisibility) {
   for (const layerId of [SITE_LAYER_ID, SELECTED_SITE_LAYER_ID, SELECTED_SITE_LABEL_LAYER_ID]) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", visibility(layers.sites));
   }
-  for (const layerId of [CLUSTER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]) {
+  for (const layerId of [CLUSTER_LAYER_ID, CLUSTER_HOVER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", visibility(layers.clusters));
   }
   if (map.getLayer(ROUTE_LAYER_ID)) map.setLayoutProperty(ROUTE_LAYER_ID, "visibility", visibility(layers.connections));
@@ -350,7 +362,8 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
           if (!event.feature) return;
           const feature = event.feature as unknown as InteractiveMapFeature;
           const coordinates = feature.geometry.type === "Point" ? feature.geometry.coordinates : null;
-          map.setFeatureState(event.feature, { hover: true });
+          const siteId = feature.properties?.id;
+          if (typeof siteId === "string") map.setFeatureState({ source: SITE_SOURCE_ID, id: siteId }, { hover: true });
           showPointer();
           if (isPointCoordinates(coordinates)) {
             tooltip
@@ -364,7 +377,9 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
         type: "mouseleave",
         target: { layerId: SITE_LAYER_ID },
         handler: (event) => {
-          if (event.feature) map.setFeatureState(event.feature, { hover: false });
+          const feature = event.feature as unknown as InteractiveMapFeature | undefined;
+          const siteId = feature?.properties?.id;
+          if (typeof siteId === "string") map.setFeatureState({ source: SITE_SOURCE_ID, id: siteId }, { hover: false });
           tooltip.remove();
           resetPointer();
         },
@@ -376,7 +391,10 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
           if (!event.feature) return;
           const feature = event.feature as unknown as InteractiveMapFeature;
           const coordinates = feature.geometry.type === "Point" ? feature.geometry.coordinates : null;
-          map.setFeatureState(event.feature, { hover: true });
+          const clusterId = feature.properties?.cluster_id;
+          if (typeof clusterId === "number" && map.getLayer(CLUSTER_HOVER_LAYER_ID)) {
+            map.setFilter(CLUSTER_HOVER_LAYER_ID, ["==", ["get", "cluster_id"], clusterId]);
+          }
           showPointer();
           if (isPointCoordinates(coordinates)) {
             const pointCount = feature.properties?.point_count;
@@ -390,8 +408,10 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
       map.addInteraction("cluster-hover-leave", {
         type: "mouseleave",
         target: { layerId: CLUSTER_LAYER_ID },
-        handler: (event) => {
-          if (event.feature) map.setFeatureState(event.feature, { hover: false });
+        handler: () => {
+          if (map.getLayer(CLUSTER_HOVER_LAYER_ID)) {
+            map.setFilter(CLUSTER_HOVER_LAYER_ID, ["==", ["get", "cluster_id"], -1]);
+          }
           tooltip.remove();
           resetPointer();
         },

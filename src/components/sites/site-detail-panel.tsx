@@ -1,7 +1,8 @@
-import { BarChart3, BriefcaseBusiness, Camera, Check, ClipboardCheck, Eye, FilePlus2, MapPin, Settings2, UserRound, X } from "lucide-react";
+import { BriefcaseBusiness, Camera, Check, ClipboardCheck, MapPin, Settings2, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { Site, SiteStatus } from "@/types/site";
+import { SiteQuickActions } from "./site-quick-actions";
 
 const activities = [
   { title: "Inspection completed", detail: "Electrical systems inspection", date: "May 12, 2024 10:30 AM", icon: ClipboardCheck, bg: "bg-green-500" },
@@ -50,12 +51,7 @@ export function SiteDetailPanel({ site, onClose }: { site: Site; onClose: () => 
 
         <section className="pt-4">
           <h3 className="mb-3 text-xs font-semibold text-slate-800">Quick Actions</h3>
-          <div className="grid grid-cols-2 gap-2.5">
-            <Button variant="outline" className="h-11 justify-start gap-2 text-xs text-slate-700"><Eye className="text-blue-600" />View Details</Button>
-            <Button variant="outline" className="h-11 justify-start gap-2 text-xs text-slate-700"><BriefcaseBusiness className="text-blue-600" />Work Orders</Button>
-            <Button variant="outline" className="h-11 justify-start gap-2 text-xs text-slate-700"><FilePlus2 className="text-blue-600" />Add Inspection</Button>
-            <Button variant="outline" className="h-11 justify-start gap-2 text-xs text-slate-700"><BarChart3 className="text-blue-600" />Create Report</Button>
-          </div>
+          <SiteQuickActions site={site} />
         </section>
       </div>
     </aside>
