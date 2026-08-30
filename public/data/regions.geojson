@@ -1,0 +1,62 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "AREA-01", "name": "Coastal Operations", "color": "#2563eb" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-124.45, 48.55],
+          [-121.55, 48.55],
+          [-121.75, 46.75],
+          [-121.95, 43.35],
+          [-124.55, 43.35],
+          [-124.45, 48.55]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "AREA-02", "name": "Columbia Basin", "color": "#06b6d4" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-121.95, 47.75],
+          [-116.85, 47.75],
+          [-116.85, 45.20],
+          [-121.75, 45.20],
+          [-121.95, 47.75]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "AREA-03", "name": "Central Oregon", "color": "#8b5cf6" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-122.25, 45.15],
+          [-117.15, 45.15],
+          [-116.95, 42.35],
+          [-122.35, 42.35],
+          [-122.25, 45.15]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "AREA-04", "name": "Idaho Operations", "color": "#f59e0b" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-117.35, 49.00],
+          [-115.55, 49.00],
+          [-114.35, 42.20],
+          [-117.25, 42.20],
+          [-117.35, 49.00]
+        ]]
+      }
+    }
+  ]
+}

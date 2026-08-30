@@ -1,0 +1,72 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "RTE-01", "name": "Puget–Willamette Backbone", "status": "active" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-122.18, 47.55],
+          [-122.90, 47.04],
+          [-122.66, 45.64],
+          [-122.67, 45.52],
+          [-123.04, 44.94],
+          [-123.09, 44.05]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "RTE-02", "name": "Columbia Operations Link", "status": "active" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-122.67, 45.52],
+          [-121.52, 45.71],
+          [-118.79, 45.67],
+          [-119.28, 46.28],
+          [-119.12, 46.21]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "RTE-03", "name": "Eastern Washington Spur", "status": "delayed" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-119.12, 46.21],
+          [-120.51, 46.60],
+          [-117.18, 46.73],
+          [-117.42, 47.66]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "RTE-04", "name": "Idaho Water Network", "status": "active" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-116.20, 43.62],
+          [-117.02, 46.42],
+          [-116.78, 47.68]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "RTE-05", "name": "Central Oregon Connector", "status": "planned" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-123.09, 44.05],
+          [-121.31, 44.06],
+          [-117.83, 44.77],
+          [-118.79, 45.67]
+        ]
+      }
+    }
+  ]
+}
