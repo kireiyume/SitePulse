@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Focus, MapPinned, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Eraser, Focus, MapPinned, MousePointer2, Pentagon, Ruler, Search, ShieldCheck, Square, Target } from "lucide-react";
 import * as mapboxgl from "mapbox-gl/esm";
 
 import type { MapStyleName } from "@/components/dashboard/map-toolbar";
@@ -10,7 +10,7 @@ import {
   MAPBOX_INITIAL_CENTER,
   MAPBOX_INITIAL_ZOOM,
 } from "@/lib/mapbox";
-import type { Site } from "@/types/site";
+import type { AnalysisMode, Site } from "@/types/site";
 import { MapLegend } from "./map-legend";
 
 const SITE_SOURCE_ID = "mock-sites";
@@ -25,6 +25,12 @@ const CLUSTER_COUNT_LAYER_ID = "site-cluster-count";
 const SITE_LAYER_ID = "site-points";
 const SELECTED_SITE_LAYER_ID = "selected-site-halo";
 const SELECTED_SITE_LABEL_LAYER_ID = "selected-site-label";
+const ANALYSIS_SELECTED_LAYER_ID = "analysis-selected-sites";
+const ANALYSIS_SOURCE_ID = "analysis-geometry";
+const ANALYSIS_FILL_LAYER_ID = "analysis-fill";
+const ANALYSIS_LINE_LAYER_ID = "analysis-line";
+const RASTER_SOURCE_ID = "risk-raster";
+const RASTER_LAYER_ID = "risk-raster-layer";
 
 const MAP_STYLES: Record<MapStyleName, string> = {
   light: "mapbox://styles/mapbox/light-v11",
@@ -47,6 +53,17 @@ interface MapViewProps {
   mapStyle: MapStyleName;
   layers: MapLayerVisibility;
   onSelectSite: (siteId: string) => void;
+  analysisMode: AnalysisMode;
+  analysisCoordinates: [number, number][];
+  analysisGeometry: GeoJSON.Feature | null;
+  analysisSelectedSiteIds: string[];
+  rasterVisible: boolean;
+  rasterOpacity: number;
+  locationTarget: [number, number, number] | null;
+  onAnalysisModeChange: (mode: AnalysisMode) => void;
+  onAnalysisPoint: (coordinate: [number, number]) => void;
+  onClearAnalysis: () => void;
+  onSearchThisArea: (bounds: mapboxgl.LngLatBounds) => void;
 }
 
 interface InteractiveMapFeature {
@@ -74,7 +91,7 @@ function sitesToGeoJson(sites: Site[]) {
   };
 }
 
-function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: string | null, layers: MapLayerVisibility) {
+function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: string | null, analysisSelectedSiteIds: string[], layers: MapLayerVisibility) {
   if (!map.getSource(REGION_SOURCE_ID)) {
     map.addSource(REGION_SOURCE_ID, { type: "geojson", data: "/data/regions.geojson" });
     map.addLayer({
@@ -98,6 +115,17 @@ function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: 
         "line-opacity": 0.62,
       },
     });
+  }
+
+  if (!map.getSource(RASTER_SOURCE_ID)) {
+    map.addSource(RASTER_SOURCE_ID, { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" });
+    map.addLayer({ id: RASTER_LAYER_ID, type: "raster", source: RASTER_SOURCE_ID, layout: { visibility: "none" }, paint: { "raster-opacity": 0.55 } });
+  }
+
+  if (!map.getSource(ANALYSIS_SOURCE_ID)) {
+    map.addSource(ANALYSIS_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: ANALYSIS_FILL_LAYER_ID, type: "fill", source: ANALYSIS_SOURCE_ID, paint: { "fill-color": "#2563eb", "fill-opacity": 0.12 } });
+    map.addLayer({ id: ANALYSIS_LINE_LAYER_ID, type: "line", source: ANALYSIS_SOURCE_ID, paint: { "line-color": "#2563eb", "line-width": 2.5, "line-dasharray": [2, 1] } });
   }
 
   if (!map.getSource(ROUTE_SOURCE_ID)) {
@@ -237,11 +265,27 @@ function addOperationalLayers(map: mapboxgl.Map, sites: Site[], selectedSiteId: 
       "text-halo-width": 2,
     },
   });
+
+  map.addLayer({
+    id: ANALYSIS_SELECTED_LAYER_ID,
+    type: "circle",
+    source: SITE_SOURCE_ID,
+    filter: ["in", ["get", "id"], ["literal", analysisSelectedSiteIds]],
+    paint: { "circle-color": "#facc15", "circle-radius": 11, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 },
+  });
+}
+
+function updateAnalysisGeometry(map: mapboxgl.Map, coordinates: [number, number][], geometry: GeoJSON.Feature | null) {
+  const source = map.getSource(ANALYSIS_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+  if (!source) return;
+  let feature: GeoJSON.Feature | null = geometry;
+  if (!feature && coordinates.length >= 2) feature = { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } };
+  source.setData({ type: "FeatureCollection", features: feature ? [feature] : [] });
 }
 
 function setLayerVisibility(map: mapboxgl.Map, layers: MapLayerVisibility) {
   const visibility = (visible: boolean) => visible ? "visible" : "none";
-  for (const layerId of [SITE_LAYER_ID, SELECTED_SITE_LAYER_ID, SELECTED_SITE_LABEL_LAYER_ID]) {
+  for (const layerId of [SITE_LAYER_ID, SELECTED_SITE_LAYER_ID, SELECTED_SITE_LABEL_LAYER_ID, ANALYSIS_SELECTED_LAYER_ID]) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", visibility(layers.sites));
   }
   for (const layerId of [CLUSTER_LAYER_ID, CLUSTER_HOVER_LAYER_ID, CLUSTER_COUNT_LAYER_ID]) {
@@ -281,7 +325,7 @@ function fitSites(map: mapboxgl.Map, sites: Site[]) {
   map.fitBounds(bounds, { padding: 56, maxZoom: 8, duration: 700 });
 }
 
-export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite }: MapViewProps) {
+export function MapView({ sites, selectedSiteId, mapStyle, layers, analysisMode, analysisCoordinates, analysisGeometry, analysisSelectedSiteIds, rasterVisible, rasterOpacity, locationTarget, onSelectSite, onAnalysisModeChange, onAnalysisPoint, onClearAnalysis, onSearchThisArea }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const sitesRef = useRef(sites);
@@ -289,13 +333,28 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
   const layersRef = useRef(layers);
   const onSelectSiteRef = useRef(onSelectSite);
   const mapStyleRef = useRef(mapStyle);
+  const analysisModeRef = useRef(analysisMode);
+  const onAnalysisPointRef = useRef(onAnalysisPoint);
+  const rasterVisibleRef = useRef(rasterVisible);
+  const rasterOpacityRef = useRef(rasterOpacity);
+  const analysisCoordinatesRef = useRef(analysisCoordinates);
+  const analysisGeometryRef = useRef(analysisGeometry);
+  const analysisSelectedSiteIdsRef = useRef(analysisSelectedSiteIds);
+  const [hasMoved, setHasMoved] = useState(false);
 
   useEffect(() => {
     sitesRef.current = sites;
     selectedSiteIdRef.current = selectedSiteId;
     layersRef.current = layers;
     onSelectSiteRef.current = onSelectSite;
-  }, [layers, onSelectSite, selectedSiteId, sites]);
+    analysisModeRef.current = analysisMode;
+    onAnalysisPointRef.current = onAnalysisPoint;
+    rasterVisibleRef.current = rasterVisible;
+    rasterOpacityRef.current = rasterOpacity;
+    analysisCoordinatesRef.current = analysisCoordinates;
+    analysisGeometryRef.current = analysisGeometry;
+    analysisSelectedSiteIdsRef.current = analysisSelectedSiteIds;
+  }, [analysisCoordinates, analysisGeometry, analysisMode, analysisSelectedSiteIds, layers, onAnalysisPoint, onSelectSite, rasterOpacity, rasterVisible, selectedSiteId, sites]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -328,7 +387,12 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
     });
     const handleStyleLoad = () => {
       tooltip.remove();
-      addOperationalLayers(map, sitesRef.current, selectedSiteIdRef.current, layersRef.current);
+      addOperationalLayers(map, sitesRef.current, selectedSiteIdRef.current, analysisSelectedSiteIdsRef.current, layersRef.current);
+      if (map.getLayer(RASTER_LAYER_ID)) {
+        map.setLayoutProperty(RASTER_LAYER_ID, "visibility", rasterVisibleRef.current ? "visible" : "none");
+        map.setPaintProperty(RASTER_LAYER_ID, "raster-opacity", rasterOpacityRef.current);
+      }
+      updateAnalysisGeometry(map, analysisCoordinatesRef.current, analysisGeometryRef.current);
     };
     const showPointer = () => { map.getCanvas().style.cursor = "pointer"; };
     const resetPointer = () => { map.getCanvas().style.cursor = ""; };
@@ -418,6 +482,13 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
       });
     };
 
+    const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
+      if (analysisModeRef.current !== "none" && analysisModeRef.current !== "nearby") onAnalysisPointRef.current([event.lngLat.lng, event.lngLat.lat]);
+    };
+    const handleMoveEnd = () => { setHasMoved(true); };
+    map.on("click", handleMapClick);
+    map.on("moveend", handleMoveEnd);
+
     map.on("style.load", handleStyleLoad);
     map.once("load", registerInteractions);
 
@@ -457,6 +528,29 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    updateAnalysisGeometry(map, analysisCoordinates, analysisGeometry);
+  }, [analysisCoordinates, analysisGeometry]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map?.getLayer(ANALYSIS_SELECTED_LAYER_ID)) map.setFilter(ANALYSIS_SELECTED_LAYER_ID, ["in", ["get", "id"], ["literal", analysisSelectedSiteIds]]);
+  }, [analysisSelectedSiteIds]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || !map.getLayer(RASTER_LAYER_ID)) return;
+    map.setLayoutProperty(RASTER_LAYER_ID, "visibility", rasterVisible ? "visible" : "none");
+    map.setPaintProperty(RASTER_LAYER_ID, "raster-opacity", rasterOpacity);
+  }, [rasterOpacity, rasterVisible]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && locationTarget) map.flyTo({ center: [locationTarget[0], locationTarget[1]], zoom: locationTarget[2], duration: 900 });
+  }, [locationTarget]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || mapStyleRef.current === mapStyle) return;
     mapStyleRef.current = mapStyle;
     map.setStyle(MAP_STYLES[mapStyle]);
@@ -474,13 +568,31 @@ export function MapView({ sites, selectedSiteId, mapStyle, layers, onSelectSite 
     <div className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-[#e8eee4] shadow-inner">
       <div ref={containerRef} className="sitepulse-map absolute inset-0 z-0" aria-label="Interactive infrastructure operations map" />
 
+
       <div className="absolute left-3 top-[100px] z-10 space-y-2">
         <button type="button" onClick={fitVisibleSites} aria-label="Fit to visible sites" className="flex size-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 shadow-md hover:bg-slate-50"><Focus className="size-4" /></button>
       </div>
 
+      <div className="absolute left-3 top-[150px] z-10 flex flex-col gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
+        <MapToolButton active={analysisMode === "none"} label="Normal selection" onClick={() => onAnalysisModeChange("none")}><MousePointer2 className="size-4" /></MapToolButton>
+        <MapToolButton active={analysisMode === "select-area"} label="Select area" onClick={() => onAnalysisModeChange(analysisMode === "select-area" ? "none" : "select-area")}><Pentagon className="size-4" /></MapToolButton>
+        <MapToolButton active={analysisMode === "measure-distance"} label="Measure distance" onClick={() => onAnalysisModeChange(analysisMode === "measure-distance" ? "none" : "measure-distance")}><Ruler className="size-4" /></MapToolButton>
+        <MapToolButton active={analysisMode === "measure-area"} label="Measure area" onClick={() => onAnalysisModeChange(analysisMode === "measure-area" ? "none" : "measure-area")}><Square className="size-4" /></MapToolButton>
+        <MapToolButton active={analysisMode === "nearby"} label="Nearby selected site" onClick={() => onAnalysisModeChange(analysisMode === "nearby" ? "none" : "nearby")}><Target className="size-4" /></MapToolButton>
+        {(analysisCoordinates.length > 0 || analysisGeometry) && <MapToolButton active={false} label="Clear analysis" onClick={onClearAnalysis}><Eraser className="size-4" /></MapToolButton>}
+      </div>
+
+      {hasMoved && analysisMode === "none" ? <button type="button" onClick={() => { const bounds = mapRef.current?.getBounds(); if (bounds) onSearchThisArea(bounds); }} className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-medium text-blue-700 shadow-md hover:bg-blue-50"><Search className="size-3.5" />Search this area</button> : null}
+
+      {analysisMode !== "none" && analysisMode !== "nearby" ? <div className="absolute bottom-4 left-4 z-10 rounded-lg border border-blue-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-md"><Target className="mr-1 inline size-3.5 text-blue-600" />{analysisMode === "select-area" ? "Click 3+ points to select an area" : analysisMode === "measure-distance" ? "Click points to measure distance" : "Click 3+ points to measure area"}</div> : null}
+
       <MapLegend />
     </div>
   );
+}
+
+function MapToolButton({ active, label, onClick, children }: { active: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" aria-label={label} title={label} onClick={onClick} className={`flex size-9 items-center justify-center rounded-md ${active ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{children}</button>;
 }
 
 function MapConfigurationError({ message }: { message: string }) {

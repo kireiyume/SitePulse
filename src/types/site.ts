@@ -16,3 +16,21 @@ export interface Site {
   lastUpdated: string;
   estimatedCompletion?: string;
 }
+
+export type SiteActivityType = "inspection" | "maintenance" | "work-order" | "photo" | "status-change";
+
+export interface SiteActivity {
+  id: string;
+  siteId: string;
+  type: SiteActivityType;
+  timestamp: string;
+  title: string;
+  description?: string;
+}
+
+export interface NearbySiteResult {
+  siteId: string;
+  distanceKm: number;
+}
+
+export type AnalysisMode = "none" | "select-area" | "nearby" | "measure-distance" | "measure-area";
